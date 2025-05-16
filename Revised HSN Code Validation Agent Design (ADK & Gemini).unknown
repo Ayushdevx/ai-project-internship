@@ -1,0 +1,228 @@
+# Revised HSN Code Validation Agent Design (ADK & Gemini)
+
+This document outlines the revised design for the HSN Code Validation Agent, adhering to the requirement of using Google's Agent Development Kit (ADK) and leveraging Gemini for reasoning and validation tasks.
+
+## 1. Introduction
+
+The primary objective of this agent is to validate Harmonized System Nomenclature (HSN) codes based on a provided master dataset in an Excel file. This revised design focuses on an implementation within the ADK framework, utilizing Gemini for its core validation logic, as per the assignment feedback.
+
+## 2. Agent Architecture within ADK
+
+The HSN Code Validation Agent will be implemented as an `LlmAgent` within the ADK framework. This agent will be responsible for understanding user queries related to HSN codes, interacting with tools to fetch HSN data, and using Gemini's reasoning capabilities to perform the validation.
+
+### 2.1. Core ADK Components:
+
+*   **Main Agent (`HSNValidationAgent`):**
+    *   **Type:** `LlmAgent` (from `google.adk.agents`).
+    *   **Model:** Configured to use a suitable Gemini model (e.g., `gemini-pro` or a version specified for ADK integration via Vertex AI).
+    *   **Instruction/Prompt:** Carefully crafted instructions will guide Gemini on how to process HSN validation requests. This will include understanding the structure of HSN codes, the types of validation required (format, existence, hierarchical), and how to interpret data from the HSN master list.
+    *   **Description:** "An intelligent agent that validates HSN codes against a master dataset and provides detailed descriptions and validation status."
+    *   **Tools:** The agent will be equipped with a custom tool to access and query the HSN master data.
+
+### 2.2. Key Agent Components (ADK Terminology):
+
+*   **Intents (Implicit via Prompting):** While ADK might support explicit intent definition, for this HSN validator, the primary intent ("validate HSN code") will be handled through natural language understanding by the Gemini model, guided by the agent's main instruction prompt.
+    *   Example user inputs: "Validate HSN code 01011010", "Is 998311 a valid HSN?", "Check these HSN codes: 01, 0101, ABCDE".
+*   **Entities (Extracted by Gemini):** The Gemini model, as part of the `LlmAgent`, will be responsible for extracting the HSN code(s) from the user's input.
+*   **Fulfillment Logic (Gemini + Custom Tool):
+    1.  **Input Processing:** The `HSNValidationAgent` receives the user's query.
+    2.  **HSN Code Extraction:** Gemini, guided by the agent's prompt, extracts the HSN code(s) to be validated.
+    3.  **Tool Call - Data Retrieval:** The agent invokes a custom `HSNDataTool` to fetch relevant information for the extracted HSN code(s) from the HSN_Master_Data.xlsx file.
+    4.  **Gemini-Powered Validation:** The data retrieved by the tool (or a confirmation of absence) is passed back to the Gemini model. The agent's prompt will instruct Gemini to perform:
+        *   **Format Validation:** Based on rules (e.g., numeric, length constraints like 2, 4, 6, 8 digits) that can be part of the prompt or inferred by Gemini from the dataset examples if the tool provides sample data structure.
+        *   **Existence Validation:** Checking if the exact HSN code (and its description) was returned by the `HSNDataTool`.
+        *   **Hierarchical Validation (Optional):** If an 8-digit code is provided, the prompt will instruct Gemini to request the tool to check for parent codes (e.g., 6-digit, 4-digit, 2-digit) and then reason about their validity and relationship.
+    5.  **Response Generation:** Gemini formulates a natural language response based on the validation outcome.
+*   **Data Stores:**
+    *   **HSN Master Data:** The `HSN_Master_Data.xlsx` file. This will be accessed by a custom ADK tool.
+    *   **Agent State (Managed by ADK):** ADK will manage the conversational state, tool call history, etc.
+
+### 2.3. Custom Tool: `HSNDataTool`
+
+This tool will be a Python class or function registered with the ADK, allowing the `HSNValidationAgent` to interact with the Excel data.
+
+*   **Functionality:**
+    *   Load and preprocess the `HSN_Master_Data.xlsx` file (e.g., into a pandas DataFrame or a searchable dictionary in memory) upon initialization or first use. This addresses the efficiency concern for potentially large datasets.
+    *   Provide methods to:
+        *   `lookup_hsn_code(hsn_code: str)`: Returns the description and any other relevant data for a given HSN code if it exists. Returns a specific indicator (e.g., None or an error structure) if not found.
+        *   `get_parent_codes_info(hsn_code: str)`: For a given HSN code, retrieves information about its hierarchical parents (e.g., 010110, 0101, 01 for 01011010).
+        *   `get_hsn_code_format_rules()`: (Optional) Could provide Gemini with explicit rules about HSN code structure derived from the dataset (e.g., observed lengths, numeric nature).
+*   **Docstring/Description for ADK:** The tool's docstring will be crucial for Gemini (via ADK) to understand its capabilities and when to call it with appropriate parameters.
+    ```python
+    # Example Tool Definition (Conceptual)
+    class HSNDataTool:
+        """A tool to access and query the HSN Master Data Excel file.
+        Use this tool to find descriptions for HSN codes and check for the existence of HSN codes and their parent codes.
+        """
+        def __init__(self, file_path: str):
+            # Load and preprocess Excel data here
+            self.data = self._load_data(file_path)
+
+        def _load_data(self, file_path: str) -> dict: # Or pandas DataFrame
+            # Implementation to load Excel, clean, and structure data for efficient lookup
+            # e.g., df = pd.read_excel(file_path); store as df or dict
+            # Ensure HSN codes are standardized (e.g., string, uppercase, no special chars)
+            pass
+
+        def lookup_hsn_code(self, hsn_code: str) -> dict:
+            """Looks up an HSN code in the master data. 
+            Args:
+                hsn_code (str): The HSN code to look up (e.g., '0101', '01011010').
+            Returns:
+                dict: A dictionary containing {'status': 'found', 'description': '...', 'code': '...'} or {'status': 'not_found'}.
+            """
+            # Implementation to search for the HSN code in self.data
+            pass
+
+        def get_parent_codes_info(self, hsn_code: str) -> list:
+            """Retrieves information for hierarchical parent codes of a given HSN code.
+            Args:
+                hsn_code (str): The HSN code (e.g., '01011010').
+            Returns:
+                list: A list of dictionaries, each representing a parent code and its status/description.
+                      Example: [{'parent_code': '010110', 'status': 'found', 'description': '...'}, ...]
+            """
+            # Implementation to find parent codes and their details
+            pass
+    ```
+
+## 3. Data Handling
+
+*   **Accessing `HSN_Master_Data.xlsx`:** The `HSNDataTool` will be responsible for loading the Excel file. The path to the file would be a configuration parameter for the tool or agent.
+*   **Processing:** Inside the tool, pandas can still be used for efficient loading and initial processing (cleaning, indexing) of the Excel data. The key difference is that this processing is encapsulated within a tool that the ADK agent calls, rather than the agent logic itself being pandas-driven.
+*   **Pre-processing vs. On-demand Loading:**
+    *   **Pre-processing (Recommended):** The `HSNDataTool` would load and process the Excel file into an optimized in-memory structure (e.g., a dictionary or an indexed pandas DataFrame) when the tool is initialized (i.e., when the agent starts). This is suitable for HSN data which is relatively static.
+        *   **Pros:** Faster query responses during agent operation.
+        *   **Cons:** Initial startup time for the agent might be slightly longer.
+    *   **On-demand Loading:** Not recommended for this use case due to performance implications for each validation request.
+
+## 4. Validation Logic using Gemini
+
+The core validation logic will be orchestrated by the `HSNValidationAgent`'s prompt and Gemini's reasoning capabilities, supplemented by information from the `HSNDataTool`.
+
+*   **Prompt Engineering:** The agent's system prompt will be critical. It will instruct Gemini:
+    *   To identify HSN codes in user input.
+    *   To call the `HSNDataTool` to get information about these codes.
+    *   **Format Validation:** To check if the input code structure (e.g., all digits, length of 2, 4, 6, or 8) is valid. This can be a rule in the prompt, or Gemini can infer typical formats if the tool provides some examples or metadata about the HSN codes in the dataset.
+    *   **Existence Validation:** To determine if a code is valid based on whether the `HSNDataTool` found it in the master data.
+    *   **Hierarchical Validation (Optional):** If a detailed code (e.g., 8-digit) is given, instruct Gemini to use the `HSNDataTool` to check its parent codes (6-digit, 4-digit, 2-digit). Gemini would then synthesize this information to report on the validity of the hierarchy.
+    *   To formulate clear responses for valid and invalid codes, including reasons for invalidity.
+
+*   **Example Interaction Flow (Conceptual):**
+    1.  **User:** "Is HSN code 01011010 valid? And what about 9999?"
+    2.  **`HSNValidationAgent` (Gemini):** Parses the request, identifies HSN codes "01011010" and "9999".
+    3.  **`HSNValidationAgent`:** Calls `HSNDataTool.lookup_hsn_code(hsn_code="01011010")`.
+    4.  **`HSNDataTool`:** Looks up "01011010", finds it, returns `{"status": "found", "description": "LIVE HORSES...", "code": "01011010"}`.
+    5.  **`HSNValidationAgent`:** Calls `HSNDataTool.get_parent_codes_info(hsn_code="01011010")` (for hierarchical check).
+    6.  **`HSNDataTool`:** Returns parent info, e.g., `[{"parent_code": "010110", "status": "found", ...}, ...]`.
+    7.  **`HSNValidationAgent`:** Calls `HSNDataTool.lookup_hsn_code(hsn_code="9999")`.
+    8.  **`HSNDataTool`:** Looks up "9999", doesn't find it, returns `{"status": "not_found"}`.
+    9.  **`HSNValidationAgent` (Gemini):** Receives all tool outputs. Based on its instructions:
+        *   Confirms "01011010" is numeric, valid length.
+        *   Confirms "01011010" exists, notes its description and parent validity.
+        *   Confirms "9999" is numeric, valid length.
+        *   Notes "9999" was not found.
+    10. **`HSNValidationAgent` (Gemini):** Generates response: "The HSN code 01011010 is valid. Description: LIVE HORSES... Its parent codes 010110, 0101, and 01 are also valid. The HSN code 9999 was not found in the master data."
+
+## 5. Agent Response
+
+The agent, powered by Gemini, will provide natural language responses:
+*   **Valid HSN Code:** Confirmation, description, and optionally, results of hierarchical validation.
+    *   Example: "Yes, HSN code 01011010 is valid. It refers to 'LIVE HORSES, ASSES, MULES AND HINNIES PURE-BRED BREEDING ANIMALS HORSES'. Its parent codes 010110, 0101, and 01 are also present in the master data."
+*   **Invalid HSN Code:**
+    *   **Format Error:** "The HSN code 'ABC12' is invalid because it contains non-numeric characters. HSN codes should be numeric and typically 2, 4, 6, or 8 digits long."
+    *   **Not Found:** "The HSN code '99999999' appears to have a valid format but was not found in our master data."
+    *   **Hierarchical Inconsistency (Optional):** "HSN code '12345678' was found, but its parent chapter '12' is not in the master data. This might indicate an issue with the data."
+
+## 6. Handling User Input
+
+*   **Single HSN Code:** Gemini will extract the single code.
+*   **Multiple HSN Codes:** The prompt will instruct Gemini to identify and process multiple codes in a single query, potentially making multiple tool calls or a batch tool call if the `HSNDataTool` is designed to support it.
+
+## 7. ADK Framework Leverage
+
+*   **`LlmAgent`:** Core for integrating Gemini's reasoning.
+*   **Tools:** Custom `HSNDataTool` for data interaction, following ADK's tool definition patterns.
+*   **Orchestration:** ADK manages the flow between user input, LLM processing, tool calls, and response generation.
+*   **Developer UI/CLI (`adk web`, `adk run`):** For local testing and interaction as described in ADK documentation.
+
+## 8. Bonus Points Considerations (ADK/Gemini Context)
+
+*   **Interactive/Conversational:** The `LlmAgent` inherently supports conversational interaction. Follow-up questions or clarifications can be handled naturally by Gemini maintaining context (managed by ADK).
+*   **HSN Master Data Updates:** The `HSNDataTool` could be designed to reload the Excel file periodically or via a specific trigger/command to the agent, allowing updates without full agent redeployment. Gemini could even be prompted to inform the user if the data was recently updated.
+*   **Feedback on Data Quality:** Gemini, guided by its prompt and the results from `HSNDataTool` (especially hierarchical checks), could identify patterns of inconsistency (e.g., many child codes without parents) and formulate feedback on the master data's quality.
+
+## 9. Pseudocode for `agent.py` (Conceptual)
+
+```python
+from google.adk.agents import LlmAgent
+# from google.adk.tools import Tool # Or how custom tools are defined
+
+# --- HSNDataTool Definition (as conceptualized above) ---
+# class HSNDataTool(Tool): # Assuming a base Tool class exists
+#     def __init__(self, file_path: str):
+#         super().__init__(name="HSNDataTool", description="Tool to query HSN master data.")
+#         self.data_handler = # ... Initialize with pandas or other logic for Excel
+# 
+#     def lookup_hsn_code(self, hsn_code: str) -> dict:
+#         # ... implementation ...
+#         pass
+# 
+#     def get_parent_codes_info(self, hsn_code: str) -> list:
+#         # ... implementation ...
+#         pass
+
+# In a real ADK setup, the tool would be defined properly and registered.
+# For this design document, we assume HSNDataTool is available.
+# We would instantiate it, e.g.:
+# hsn_tool = HSNDataTool(file_path="/path/to/HSN_Master_Data.xlsx")
+
+# --- Agent Definition ---
+
+# This is a placeholder for how the tool would be defined and made available.
+# In ADK, tools are typically Python functions or methods with type hints and docstrings.
+# For this conceptual design, we'll assume the ADK can be configured to use 
+# an instance of a class that has methods like lookup_hsn_code.
+
+# Placeholder for the actual tool implementation and registration with ADK
+# For the purpose of this design, we'll assume 'hsn_data_query_tool' is a 
+# registered tool name that ADK and Gemini can invoke, which maps to 
+# the HSNDataTool's methods.
+
+HSN_VALIDATION_INSTRUCTIONS = """
+You are an HSN Code Validation Agent. Your task is to validate HSN codes provided by the user against a master dataset.
+
+When a user provides one or more HSN codes:
+1.  For each HSN code, first determine if its format is valid. A valid format is numeric and typically 2, 4, 6, or 8 digits long. If not, state the format is invalid and why.
+2.  If the format is valid, use the 'HSNDataTool' to look up the HSN code in the master data.
+3.  If the HSN code is found, report it as valid and provide its description from the master data.
+4.  (Optional Hierarchical Check) If an 8-digit code is found, also use the 'HSNDataTool' to check its 6-digit, 4-digit, and 2-digit parent codes. Report their status (found/not found) and descriptions if found.
+5.  If the HSN code is not found in the master data after a format check, report it as invalid because it's not in the master list.
+6.  If multiple HSN codes are provided, validate each one and provide a consolidated response.
+7.  Be clear and concise in your responses.
+
+Available tools:
+- HSNDataTool: 
+    - lookup_hsn_code(hsn_code: str): Looks up an HSN code. Returns {'status': 'found'/'not_found', 'description': '...', 'code': '...'}.
+    - get_parent_codes_info(hsn_code: str): Gets info for parent codes. Returns list of {'parent_code': '...', 'status': 'found'/'not_found', 'description': '...'}.
+"""
+
+# In the actual agent.py for ADK:
+hsn_validation_agent = LlmAgent(
+    model="gemini-pro", # Or the appropriate Gemini model identifier for ADK
+    name="HSNValidationAgent",
+    description="Validates HSN codes using a master Excel sheet and provides descriptions.",
+    instruction=HSN_VALIDATION_INSTRUCTIONS,
+    tools=[HSNDataTool(file_path="/path/to/HSN_Master_Data.xlsx")] # Conceptual: how tool instance might be passed
+    # In a real ADK setup, tools are often registered functions or classes that ADK instantiates or calls.
+    # The 'tools' parameter would take a list of these registered tool functions/classes.
+)
+
+# The ADK framework would then handle running this agent (e.g., via 'adk run HSNValidationAgent' or 'adk web').
+# User interaction would go through the ADK's interface (CLI or Web UI).
+```
+
+## 10. Conclusion
+
+This revised design shifts the HSN Code Validation Agent to an ADK-centric approach, with Gemini at the core of its reasoning and validation capabilities. The `HSNDataTool` encapsulates data access, allowing Gemini to focus on understanding the request, orchestrating tool use, and formulating intelligent responses. This aligns with the assignment's requirement to demonstrate proficiency in building agents using Google's modern AI tools.
+
